@@ -26,10 +26,32 @@ echo Copy the bin folder
 mkdir -p $PACKAGE_BASE/bin
 cp -r $INSTALL_SOURCE/bin/* $PACKAGE_BASE/bin
 
-echo Patching shiboken6 to set the rpath to $ORIGIN
+echo Patching shiboken6 rpath and bundling libclang
 # Add relative RPATH to shiboken6 so that it can find shared libraries for Qt6 based on the CWD that is set in the custom command 
 # in Findpyside6.cmake to run shiboken
-patchelf --set-rpath '$ORIGIN:./../lib' $PACKAGE_BASE/bin/shiboken6
+install_name_tool -add_rpath @executable_path/../lib $PACKAGE_BASE/bin/shiboken6 2>/dev/null || true
+install_name_tool -add_rpath @executable_path/../lib $PACKAGE_BASE/shiboken6_generator/shiboken6 2>/dev/null || true
+
+# Bundle libclang.dylib so the package is self-contained and doesn't require
+# Homebrew llvm on the target machine
+LLVM_LIBCLANG="/opt/homebrew/opt/llvm@20/lib/libclang.dylib"
+if [ -f "$LLVM_LIBCLANG" ]; then
+    echo "Bundling libclang.dylib from $LLVM_LIBCLANG"
+    cp "$LLVM_LIBCLANG" $PACKAGE_BASE/lib/libclang.dylib
+
+    # Rewrite shiboken6 references to use the bundled libclang via @rpath
+    install_name_tool -change \
+        "$LLVM_LIBCLANG" \
+        @rpath/libclang.dylib \
+        $PACKAGE_BASE/bin/shiboken6
+
+    install_name_tool -change \
+        "$LLVM_LIBCLANG" \
+        @rpath/libclang.dylib \
+        $PACKAGE_BASE/shiboken6_generator/shiboken6
+else
+    echo "WARNING: $LLVM_LIBCLANG not found. shiboken6 may not work on machines without llvm@20."
+fi
 
 echo Copy the lib folder
 mkdir -p $PACKAGE_BASE/lib
